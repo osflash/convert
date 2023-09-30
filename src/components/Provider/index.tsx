@@ -3,6 +3,8 @@
 import React from 'react'
 
 import { ThemeProvider } from 'next-themes'
+
+import { FFmpegProvider } from '~/providers/FFmpeg'
 interface ProviderProps {
   children: React.ReactNode
 }
@@ -16,7 +18,9 @@ export const Provider: React.FC<ProviderProps> = ({ children }) => {
         enableSystem
         disableTransitionOnChange
       >
-        <>{children}</>
+        <FFmpegProvider>
+          <>{children}</>
+        </FFmpegProvider>
       </ThemeProvider>
     </>
   )

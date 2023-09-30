@@ -3,11 +3,20 @@
 import React, { useMemo, useState } from 'react'
 import { FormProvider, useForm } from 'react-hook-form'
 
+import { fetchFile } from '@ffmpeg/util'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { PromisePool } from '@supercharge/promise-pool'
 import { FileVideoIcon, Wand2Icon } from 'lucide-react'
+import mime from 'mime'
+import { NFTStorage } from 'nft.storage'
+import { Blockstore } from 'nft.storage/src/platform.js'
 import { z } from 'zod'
 
-import { cn } from '~/libs/utils'
+import { splitter } from '~/libs/splitter'
+
+import { storage } from '~/services/storage'
+
+import { useFFmpeg } from '~/providers/FFmpeg'
 
 import {
   Form,
@@ -21,6 +30,7 @@ import {
 import { Label } from '~/components/ui/label'
 import { Progress } from '~/components/ui/progress'
 
+import { FFmpeg } from '../FFmpeg'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Checkbox } from '../ui/checkbox'
@@ -71,10 +81,10 @@ const resolutions = Object.values(resolutionsSchema.Values)
 const bitrates = ['8000k', '4000k', '2000k', '1000k', '500k']
 
 export const ConvertForm: React.FC = () => {
+  const [cids, setCID] = useState<string[] | null>(null)
+
   const [convertProgress, setConvertProgress] = useState(0)
   const [uploadProgress, setUploadProgress] = useState(0)
-
-  const [storage, setStorage] = useState(false)
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -84,8 +94,126 @@ export const ConvertForm: React.FC = () => {
     }
   })
 
-  const handleSubmit = (data: FormData) => {
-    console.log(data)
+  const { ffmpeg } = useFFmpeg()
+
+  const convertVideo = async (
+    video: File,
+    resolutions: z.infer<typeof resolutionsSchema>[]
+  ) => {
+    console.log('Convert started.')
+
+    await ffmpeg.writeFile(video.name, await fetchFile(video))
+
+    ffmpeg.on('progress', file => {
+      const progress =
+        Math.round(file.progress * 10_000) / 100 / resolutions.length
+
+      setConvertProgress(progress)
+
+      console.log(`Convert progress: ${progress}`)
+    })
+
+    const { results } = await PromisePool.withConcurrency(1)
+      .for(resolutions)
+      .process(async (resolution, i) => {
+        const bitrate = bitrates[i]
+
+        await ffmpeg.createDir(resolution)
+
+        await ffmpeg.exec([
+          '-i',
+          video.name,
+          '-vf',
+          `scale=${resolution}`,
+          '-b:v',
+          bitrate,
+          '-c:v',
+          'libx264',
+          '-g',
+          '30',
+          '-c:a',
+          'aac',
+          '-f',
+          'hls',
+          '-hls_time',
+          '6',
+          '-hls_list_size',
+          '0',
+          '-hls_segment_filename',
+          `${resolution}/output_%03d.ts`,
+          `${resolution}/output.m3u8`
+        ])
+
+        const files = (await ffmpeg.listDir(resolution)).filter(
+          ({ isDir }) => !isDir
+        )
+
+        const data = await Promise.all(
+          files.map(async dir => {
+            const file = await ffmpeg.readFile(`${resolution}/${dir.name}`)
+            const type = mime.getType(dir.name) || undefined
+
+            const videoFileBlob = new Blob([file], { type })
+
+            return new File([videoFileBlob], dir.name, { type })
+          })
+        )
+
+        processUpload(data)
+
+        return data
+      })
+
+    console.log('Convert finished.')
+
+    return results
+  }
+
+  const processUpload = async (files: File[]) => {
+    const blockstore = new Blockstore()
+
+    const { car, cid } = await NFTStorage.encodeDirectory(files, { blockstore })
+
+    const uploadProgress = new Map<number, number>()
+
+    try {
+      const blobs = await splitter(car)
+
+      await PromisePool.withConcurrency(1)
+        .for(blobs)
+        .process(async (blob, i) => {
+          return await storage.post('/upload', blob, {
+            headers: {
+              'Content-Type': 'application/car',
+              Authorization: `Bearer ${process.env.NEXT_PUBLIC_NFT_STORAGE_TOKEN}`
+            },
+            onUploadProgress: async e => {
+              let totalProgress = 0
+
+              uploadProgress.set(i, e.progress ?? 0)
+
+              uploadProgress.forEach(value => (totalProgress += value))
+
+              const progress =
+                Math.round(totalProgress * 10_000) / 100 / blobs.length
+
+              setUploadProgress(progress)
+            }
+          })
+        })
+
+      setCID(prev => prev?.concat(cid) || [cid])
+    } catch (err) {
+      //
+    } finally {
+      await blockstore.close()
+    }
+  }
+
+  const handleSubmit = async (data: FormData) => {
+    const videoFile = data.video[0]
+
+    const video = await convertVideo(videoFile, data.resolutions)
   }
 
   const videoFile = form.watch('video')
@@ -94,6 +222,9 @@ export const ConvertForm: React.FC = () => {
     if (!videoFile) {
       return null
     }
+
+    setConvertProgress(0)
+    setUploadProgress(0)
 
     const file = videoFile[0]
 
@@ -110,6 +241,8 @@ export const ConvertForm: React.FC = () => {
         onSubmit={form.handleSubmit(handleSubmit)}
         className="w-80 space-y-6"
       >
+        <FFmpeg />
+
         <FormField
           control={form.control}
           name="video"
@@ -198,7 +331,7 @@ export const ConvertForm: React.FC = () => {
           )}
         />
 
-        <div className="flex items-center space-x-2">
+        {/* <div className="flex items-center space-x-2">
           <Checkbox
             id="storage"
             checked={storage}
@@ -207,13 +340,13 @@ export const ConvertForm: React.FC = () => {
             }}
           />
           <Label htmlFor="storage">Deseja armazenar no nft.storage?</Label>
-        </div>
+        </div> */}
 
         <FormField
           control={form.control}
           name="apitKey"
           render={({ field }) => (
-            <FormItem className={cn({ hidden: !storage })}>
+            <FormItem>
               <FormLabel>
                 Chave de API da nft.storage{' '}
                 <Badge variant="warning">opcional</Badge>
@@ -246,6 +379,15 @@ export const ConvertForm: React.FC = () => {
           <Label>Progresso de Envio</Label>
           <Progress value={uploadProgress} />
         </div>
+
+        {cids &&
+          cids.map(cid => (
+            <Input
+              key={cid}
+              value={`https://nftstorage.link/ipfs/${cid}`}
+              readOnly
+            />
+          ))}
 
         <Button
           type="submit"
