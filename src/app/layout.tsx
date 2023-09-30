@@ -5,7 +5,9 @@ import React from 'react'
 import type { Metadata } from 'next'
 
 import { fontRoboto } from '~/libs/fonts'
+import { envSchema } from '~/libs/zod'
 
+import { Header } from '~/components/Header'
 import { Provider } from '~/components/Provider'
 
 export const metadata: Metadata = {
@@ -18,10 +20,14 @@ interface RootLayoutProps {
 }
 
 const RootLayout: React.FC<RootLayoutProps> = ({ children }) => {
+  envSchema.parse(process.env)
+
   return (
     <html lang="pt-br" className={fontRoboto.variable} suppressHydrationWarning>
       <body>
         <Provider>
+          <Header />
+
           <>{children}</>
         </Provider>
       </body>

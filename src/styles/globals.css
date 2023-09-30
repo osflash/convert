@@ -28,6 +28,9 @@
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
 
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 98%;
+
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 10% 3.9%;
@@ -60,6 +63,9 @@
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
 
+    --warning: 38 70.6% 35%;
+    --warning-foreground: 0 0% 98%;
+
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 240 4.9% 83.9%;
@@ -72,6 +78,6 @@
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply flex min-h-screen flex-col bg-background text-foreground antialiased;
   }
 }

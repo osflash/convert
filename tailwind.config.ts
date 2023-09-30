@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss'
+import plugin from 'tailwindcss/plugin'
 
 const config: Config = {
   darkMode: ['class'],
@@ -49,7 +50,9 @@ const config: Config = {
         card: {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))'
-        }
+        },
+        warning: 'hsl(var(--warning))',
+        'warning-foreground': 'hsl(var(--warning-foreground))'
       },
       borderRadius: {
         lg: 'var(--radius)',
@@ -72,6 +75,15 @@ const config: Config = {
       }
     }
   },
-  plugins: [require('tailwindcss-animate')]
+  plugins: [
+    require('tailwindcss-animate'),
+    plugin(({ addComponents }) => {
+      addComponents({
+        '.container-inline': {
+          'container-type': 'inline-size'
+        }
+      })
+    })
+  ]
 }
 export default config
